@@ -142,8 +142,24 @@ export default function Home() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [insights, setInsights] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const { sorted: sortedReceipts, missing } = useMemo(() => buildItinerary(receipts), [receipts]);
+
+  const aiPrompt = useMemo(() => {
+    if (receipts.length === 0) return '请先上传发票，系统会自动生成可直接发送给外部 AI 的整理指令。';
+
+    const items = receipts
+      .map(
+        (r, idx) =>
+          `${idx + 1}. 【${r.category ?? '待分类'}｜${r.name}】状态：${r.status}，金额：${r.amount ?? '未识别'}，日期：${
+            r.date ?? '未识别'
+          }。OCR/说明：${r.rawText?.trim() ?? '未识别文本，请直接从图片中读取并补全。'}`,
+      )
+      .join('\n');
+
+    return `你是财务报销助手，请根据上传票据内容提取并整理出差报销清单，按“去程机票→住宿→当地交通→餐饮→返程机票→其他”顺序输出，并给出缺失材料提醒。输出 JSON：{\n  "itinerary": [\n    {"type": "出发机票|住宿|打车/用车|火车/高铁|餐饮|返程机票|其他", "file": "文件名", "amount": "金额", "date": "日期", "summary": "票据信息摘要"}\n  ],\n  "missing": ["缺失提醒"]\n}\n票据信息如下：\n${items}\n请注意：若只看到返程机票需提醒补充出发机票；有航班/火车但无住宿时提示补酒店发票；有航班但无打车单据时提示补往返接送机/车单据。`;
+  }, [receipts]);
 
   const handleDrop = (files: FileList | null) => {
     if (!files) return;
@@ -205,6 +221,17 @@ export default function Home() {
     setIsUploading(false);
   };
 
+  const handleCopy = async () => {
+    if (!aiPrompt) return;
+    try {
+      await navigator.clipboard.writeText(aiPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      console.error('复制失败', error);
+    }
+  };
+
   return (
     <main style={{ padding: '2rem 1.5rem', display: 'flex', justifyContent: 'center' }}>
       <div style={{ maxWidth: 1080, width: '100%', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -221,7 +248,7 @@ export default function Home() {
           </p>
           <p style={{ margin: 0, color: 'var(--muted)', maxWidth: 720, fontSize: '0.95rem' }}>
             当前识别使用内置 Tesseract.js OCR（中英双语，需要联网加载模型），推荐上传清晰图片（JPG/PNG）。
-            PDF 将提示转图片；若需直接识别 PDF 或更高精度，可接入云端 OCR/AI 服务。
+            PDF 将提示转图片；若需直接识别 PDF 或更高精度，可接入云端 OCR/AI 服务，页面会自动生成可复制的 AI 指令。
           </p>
         </header>
 
@@ -271,6 +298,16 @@ export default function Home() {
                 <li>缺失提醒：如缺少去程机票、住宿或打车凭证</li>
                 <li>生成报销备注：金额未识别、日期缺失时提示人工确认</li>
               </ul>
+            </div>
+            <div className="card" style={{ padding: '0.9rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem' }}>外置 AI 方案</h3>
+              <p style={{ margin: '0 0 0.35rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+                如果内置 OCR 失败，可直接把“AI 指令”复制给外部大模型（如通义千问、文心、GPT 等），让其按照指令整理报销。
+                上传后会自动包含每张票的当前识别状态及提示。
+              </p>
+              <button className="button" onClick={handleCopy} style={{ width: '100%', justifyContent: 'center' }}>
+                {copied ? '已复制指令' : '复制 AI 指令'}
+              </button>
             </div>
           </div>
         </section>
@@ -382,6 +419,32 @@ export default function Home() {
                 </ul>
               </div>
             )}
+          </div>
+          <div className="card" style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>AI 指令（可直接粘贴给外部模型）</h3>
+              <button className="button" onClick={handleCopy} style={{ whiteSpace: 'nowrap' }}>
+                {copied ? '已复制' : '复制指令'}
+              </button>
+            </div>
+            <p style={{ margin: '0.35rem 0', color: 'var(--muted)' }}>
+              指令包含当前票据的识别文本/失败提示，并明确输出格式、排序逻辑和缺失补全建议，适用于任何支持中文的通用大模型。
+            </p>
+            <textarea
+              readOnly
+              value={aiPrompt}
+              style={{
+                width: '100%',
+                minHeight: 200,
+                padding: '0.75rem',
+                borderRadius: '0.75rem',
+                border: '1px solid var(--border)',
+                background: '#f8fafc',
+                color: '#0f172a',
+                resize: 'vertical',
+                fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)',
+              }}
+            />
           </div>
         </section>
       </div>
