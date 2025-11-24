@@ -143,6 +143,13 @@ export default function Home() {
   const [insights, setInsights] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [aiProvider, setAiProvider] = useState<'openai' | 'custom'>('openai');
+  const [aiModel, setAiModel] = useState('gpt-4o-mini');
+  const [aiEndpoint, setAiEndpoint] = useState('https://api.openai.com/v1/chat/completions');
+  const [apiKey, setApiKey] = useState('');
+  const [aiResponse, setAiResponse] = useState<string>('');
+  const [isCallingAi, setIsCallingAi] = useState(false);
+  const [aiError, setAiError] = useState<string>('');
 
   const { sorted: sortedReceipts, missing } = useMemo(() => buildItinerary(receipts), [receipts]);
 
@@ -232,6 +239,54 @@ export default function Home() {
     }
   };
 
+  const handleRunAi = async () => {
+    setAiError('');
+    setAiResponse('');
+    if (!apiKey) {
+      setAiError('请先填写 API Key');
+      return;
+    }
+
+    setIsCallingAi(true);
+    try {
+      const payload = {
+        provider: aiProvider,
+        model: aiModel,
+        endpoint: aiEndpoint,
+        apiKey,
+        prompt: aiPrompt,
+        receipts: receipts.map((r) => ({
+          name: r.name,
+          category: r.category ?? '待分类',
+          status: r.status,
+          amount: r.amount ?? '未识别',
+          date: r.date ?? '未识别',
+          notes: r.notes ?? [],
+          rawText: r.rawText ?? '',
+        })),
+      };
+
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error ?? '外部 AI 调用失败');
+      }
+
+      setAiResponse(result.content ?? '外部 AI 已返回响应，请检查格式。');
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : '外部 AI 调用失败，请稍后重试。');
+    } finally {
+      setIsCallingAi(false);
+    }
+  };
+
   return (
     <main style={{ padding: '2rem 1.5rem', display: 'flex', justifyContent: 'center' }}>
       <div style={{ maxWidth: 1080, width: '100%', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -308,6 +363,76 @@ export default function Home() {
               <button className="button" onClick={handleCopy} style={{ width: '100%', justifyContent: 'center' }}>
                 {copied ? '已复制指令' : '复制 AI 指令'}
               </button>
+            </div>
+            <div className="card" style={{ padding: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>外部 AI 直连</h3>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.95rem' }}>
+                AI 类型
+                <select
+                  value={aiProvider}
+                  onChange={(e) => setAiProvider(e.target.value as 'openai' | 'custom')}
+                  className="input"
+                >
+                  <option value="openai">OpenAI / 兼容接口</option>
+                  <option value="custom">自定义（需填写 Endpoint）</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.95rem' }}>
+                Model
+                <input
+                  className="input"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  placeholder="例如 gpt-4o-mini / qwen-turbo"
+                />
+              </label>
+              {aiProvider === 'custom' && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.95rem' }}>
+                  Endpoint
+                  <input
+                    className="input"
+                    value={aiEndpoint}
+                    onChange={(e) => setAiEndpoint(e.target.value)}
+                    placeholder="https://api.your-llm.com/v1/chat/completions"
+                  />
+                </label>
+              )}
+              {aiProvider === 'openai' && (
+                <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
+                  默认为 OpenAI 兼容格式，Endpoint 将使用 https://api.openai.com/v1/chat/completions。
+                </p>
+              )}
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.95rem' }}>
+                API Key
+                <input
+                  className="input"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="仅在本地调用时使用，不会上传存储"
+                />
+              </label>
+              <button className="button" onClick={handleRunAi} disabled={isCallingAi || !aiPrompt}>
+                {isCallingAi ? '正在调用 AI...' : '开始调用外部 AI'}
+              </button>
+              {aiError && (
+                <p style={{ margin: 0, color: '#b91c1c', fontSize: '0.9rem' }}>⚠️ {aiError}</p>
+              )}
+              {aiResponse && (
+                <div className="card" style={{ background: '#f8fafc', padding: '0.75rem' }}>
+                  <strong>AI 返回</strong>
+                  <pre
+                    style={{
+                      margin: '0.35rem 0 0',
+                      whiteSpace: 'pre-wrap',
+                      fontFamily:
+                        'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)',
+                    }}
+                  >
+                    {aiResponse}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
         </section>
