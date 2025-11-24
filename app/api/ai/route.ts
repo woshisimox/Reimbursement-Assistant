@@ -15,11 +15,12 @@ interface AiRequestBody {
     notes: string[];
     rawText: string;
   }>;
+  images?: Array<{ name: string; dataUrl: string; hint?: string }>;
 }
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as Partial<AiRequestBody>;
-  const { provider, model, endpoint, apiKey, prompt, receipts } = body;
+  const { provider, model, endpoint, apiKey, prompt, receipts, images } = body;
 
   if (!provider || !model || !apiKey || !prompt) {
     return NextResponse.json({ error: '缺少必要参数（provider/model/apiKey/prompt）。' }, { status: 400 });
@@ -32,9 +33,29 @@ export async function POST(request: NextRequest) {
   }
 
   const systemPrompt =
-    '你是发票报销助手，收到的 prompt 和票据 JSON 描述了用户上传的发票。请严格按报销顺序整理，输出 JSON 格式，并标出缺失材料提醒。';
+    '你是发票报销助手，收到的 prompt 和票据 JSON 描述了用户上传的发票。若提供了票据图片，请先对图片执行 OCR，再结合 prompt 与 JSON 进行整理，最终按报销顺序输出 JSON，并标出缺失材料提醒。';
 
   const receiptJson = JSON.stringify(receipts ?? [], null, 2);
+
+  const imageMessages = (images ?? [])
+    .filter((img) => !!img.dataUrl)
+    .map((img) => ({
+      role: 'user',
+      content: [
+        { type: 'text', text: `票据图片：${img.name}。${img.hint ? `OCR 文本：${img.hint}` : '请直接从图片识别。'}` },
+        { type: 'image_url', image_url: { url: img.dataUrl } },
+      ],
+    }));
+
+  const messages: any[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+    {
+      role: 'user',
+      content: `票据 JSON：${receiptJson}\n请结合 JSON 与图片逐张 OCR 并输出最终报销清单。`,
+    },
+    ...imageMessages,
+  ];
 
   try {
     const response = await fetch(finalEndpoint, {
@@ -46,14 +67,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model,
         temperature: 0.1,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
-          {
-            role: 'user',
-            content: `票据 JSON：${receiptJson}\n请直接基于这些信息输出最终报销清单。`,
-          },
-        ],
+        messages,
       }),
     });
 

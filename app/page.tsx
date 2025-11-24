@@ -18,6 +18,7 @@ interface Receipt {
   id: string;
   name: string;
   preview?: string;
+  imageDataUrl?: string;
   status: ReceiptStatus;
   rawText?: string;
   category?: ReceiptCategory;
@@ -165,7 +166,7 @@ export default function Home() {
       )
       .join('\n');
 
-    return `你是财务报销助手，请根据上传票据内容提取并整理出差报销清单，按“去程机票→住宿→当地交通→餐饮→返程机票→其他”顺序输出，并给出缺失材料提醒。输出 JSON：{\n  "itinerary": [\n    {"type": "出发机票|住宿|打车/用车|火车/高铁|餐饮|返程机票|其他", "file": "文件名", "amount": "金额", "date": "日期", "summary": "票据信息摘要"}\n  ],\n  "missing": ["缺失提醒"]\n}\n票据信息如下：\n${items}\n请注意：若只看到返程机票需提醒补充出发机票；有航班/火车但无住宿时提示补酒店发票；有航班但无打车单据时提示补往返接送机/车单据。`;
+    return `你是财务报销助手，请对提供的原始票据图片执行 OCR，并根据识别结果整理出差报销清单，按“去程机票→住宿→当地交通→餐饮→返程机票→其他”顺序输出，并给出缺失材料提醒。输出 JSON：{\n  "itinerary": [\n    {"type": "出发机票|住宿|打车/用车|火车/高铁|餐饮|返程机票|其他", "file": "文件名", "amount": "金额", "date": "日期", "summary": "票据信息摘要"}\n  ],\n  "missing": ["缺失提醒"]\n}\n票据信息如下（如 OCR 文本为空，请直接从图片识别）：\n${items}\n请注意：若只看到返程机票需提醒补充出发机票；有航班/火车但无住宿时提示补酒店发票；有航班但无打车单据时提示补往返接送机/车单据。`;
   }, [receipts]);
 
   const handleDrop = (files: FileList | null) => {
@@ -173,13 +174,26 @@ export default function Home() {
     startUpload(Array.from(files));
   };
 
+  const toDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+
   const startUpload = async (files: File[]) => {
     setIsUploading(true);
-    const draft = files.map<Receipt>((file) => ({
+    const filesWithData = await Promise.all(
+      files.map(async (file) => ({ file, dataUrl: file.type === 'application/pdf' ? undefined : await toDataUrl(file) })),
+    );
+
+    const draft = filesWithData.map<Receipt>(({ file, dataUrl }) => ({
       id: uuidv4(),
       name: file.name,
       status: '识别中',
       preview: URL.createObjectURL(file),
+      imageDataUrl: dataUrl,
     }));
     setReceipts((prev) => [...prev, ...draft]);
 
@@ -201,12 +215,13 @@ export default function Home() {
             prev.map((r) =>
               r.id === entry.id
                 ? {
-                    ...r,
-                    status: '已完成',
-                    rawText: text,
-                    category,
-                    amount,
-                    date,
+                  ...r,
+                  status: '已完成',
+                  rawText: text,
+                  imageDataUrl: entry.imageDataUrl,
+                  category,
+                  amount,
+                  date,
                     notes,
                   }
                 : r,
@@ -219,7 +234,18 @@ export default function Home() {
               ? error.message
               : '有发票识别失败，请检查文件清晰度或改用图片格式上传。';
           newInsights.push(message);
-          setReceipts((prev) => prev.map((r) => (r.id === entry.id ? { ...r, status: '识别失败' } : r)));
+          setReceipts((prev) =>
+            prev.map((r) =>
+              r.id === entry.id
+                ? {
+                    ...r,
+                    status: '识别失败',
+                    imageDataUrl: entry.imageDataUrl,
+                    rawText: r.rawText ?? '内置 OCR 失败，已附带原图供外置 AI 识别。',
+                  }
+                : r,
+            ),
+          );
         }
       }),
     );
@@ -264,6 +290,13 @@ export default function Home() {
           notes: r.notes ?? [],
           rawText: r.rawText ?? '',
         })),
+        images: receipts
+          .filter((r) => !!r.imageDataUrl)
+          .map((r) => ({
+            name: r.name,
+            dataUrl: r.imageDataUrl!,
+            hint: r.rawText,
+          })),
       };
 
       const response = await fetch('/api/ai', {
@@ -359,6 +392,9 @@ export default function Home() {
               <p style={{ margin: '0 0 0.35rem', color: 'var(--muted)', lineHeight: 1.5 }}>
                 如果内置 OCR 失败，可直接把“AI 指令”复制给外部大模型（如通义千问、文心、GPT 等），让其按照指令整理报销。
                 上传后会自动包含每张票的当前识别状态及提示。
+              </p>
+              <p style={{ margin: 0, color: 'var(--muted)', lineHeight: 1.5 }}>
+                直接调用外部 AI 时会附带原始发票图片（非 PDF）以触发模型的视觉/OCR 能力，请确保所选模型支持图片输入。
               </p>
               <button className="button" onClick={handleCopy} style={{ width: '100%', justifyContent: 'center' }}>
                 {copied ? '已复制指令' : '复制 AI 指令'}
