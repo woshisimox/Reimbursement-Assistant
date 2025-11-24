@@ -110,15 +110,26 @@ function buildItinerary(receipts: Receipt[]) {
 async function runOcr(file: File): Promise<string> {
   const formData = new FormData();
   formData.append('file', file);
-  const response = await fetch('/api/ocr', {
-    method: 'POST',
-    body: formData,
-  });
-  if (!response.ok) {
-    throw new Error('OCR 识别失败');
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45_000);
+
+  try {
+    const response = await fetch('/api/ocr', {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(result.error ?? 'OCR 识别失败');
+    }
+
+    return result.text as string;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const result = await response.json();
-  return result.text as string;
 }
 
 export default function Home() {
@@ -175,8 +186,11 @@ export default function Home() {
           );
         } catch (error) {
           console.error(error);
-          const advice = '有发票识别失败，请检查文件清晰度或改用 PDF 上传。';
-          newInsights.push(advice);
+          const message =
+            error instanceof Error
+              ? error.message
+              : '有发票识别失败，请检查文件清晰度或改用图片格式上传。';
+          newInsights.push(message);
           setReceipts((prev) => prev.map((r) => (r.id === entry.id ? { ...r, status: '识别失败' } : r)));
         }
       }),
@@ -200,12 +214,16 @@ export default function Home() {
             支持住宿、打车、飞机、火车、餐饮等多种发票类型。系统通过 OCR 识别关键信息，
             自动生成符合行程的报销顺序，并提示缺失材料。
           </p>
+          <p style={{ margin: 0, color: 'var(--muted)', maxWidth: 720, fontSize: '0.95rem' }}>
+            当前识别使用内置 Tesseract.js OCR，建议上传清晰图片（JPG/PNG）。PDF 将提示转图片，
+            如需直接识别 PDF 或更高精度，可接入云端 OCR/AI 服务。
+          </p>
         </header>
 
         <section className="card" style={{ padding: '1.25rem', display: 'flex', gap: '1rem' }}>
           <div style={{ flex: 1, border: '1px dashed var(--border)', borderRadius: '0.75rem', padding: '1rem' }}>
             <p style={{ marginTop: 0, color: 'var(--muted)' }}>
-              拖拽或点击上传发票（图片/PDF），系统将自动识别并整理行程。
+              拖拽或点击上传发票（推荐图片，PDF 会提示转图片后再识别），系统将自动识别并整理行程。
             </p>
             <div
               onDragOver={(e) => e.preventDefault()}
@@ -343,7 +361,7 @@ export default function Home() {
           <div>
             <h3 style={{ marginTop: 0 }}>系统建议</h3>
             <ul style={{ margin: 0, paddingLeft: '1.1rem', color: 'var(--muted)', lineHeight: 1.7 }}>
-              <li>若票据模糊，可转为 PDF 后再上传，提升 OCR 精度。</li>
+                <li>若票据模糊，请拍摄/扫描为清晰图片后上传，避免 OCR 误差。</li>
               <li>同一行程建议一次性上传，系统可自动排序并检查缺失。</li>
               <li>对金额、日期未识别的票据，将标记提醒人工确认。</li>
               <li>可根据航班/车次时间，进一步匹配打车发票的时间合理性。</li>
