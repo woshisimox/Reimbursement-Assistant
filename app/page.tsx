@@ -127,6 +127,11 @@ async function runOcr(file: File): Promise<string> {
     }
 
     return result.text as string;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('OCR 超时，请检查网络或减少一次上传的票据数量。');
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -215,8 +220,8 @@ export default function Home() {
             自动生成符合行程的报销顺序，并提示缺失材料。
           </p>
           <p style={{ margin: 0, color: 'var(--muted)', maxWidth: 720, fontSize: '0.95rem' }}>
-            当前识别使用内置 Tesseract.js OCR，建议上传清晰图片（JPG/PNG）。PDF 将提示转图片，
-            如需直接识别 PDF 或更高精度，可接入云端 OCR/AI 服务。
+            当前识别使用内置 Tesseract.js OCR（中英双语，需要联网加载模型），推荐上传清晰图片（JPG/PNG）。
+            PDF 将提示转图片；若需直接识别 PDF 或更高精度，可接入云端 OCR/AI 服务。
           </p>
         </header>
 

@@ -21,13 +21,22 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   try {
-    const { data } = await Tesseract.recognize(buffer, 'eng', {
+    const { data } = await Tesseract.recognize(buffer, 'chi_sim+eng', {
       logger: () => {},
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      workerPath: 'https://unpkg.com/tesseract.js@5.1.1/dist/worker.min.js',
+      corePath: 'https://unpkg.com/tesseract.js-core@5.0.2/tesseract-core.wasm.js',
     });
 
     return NextResponse.json({ text: data.text });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: 'OCR 识别失败' }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          'OCR 识别失败：无法加载模型或识别出文本，请检查网络是否能访问 Tesseract 依赖，或改用外部 OCR/AI 服务。',
+      },
+      { status: 500 },
+    );
   }
 }
